@@ -1,0 +1,2 @@
+-r pathfinder-main/requirements.txt
+-r pathfinder-main/evacuation_simulation/requirements.txt

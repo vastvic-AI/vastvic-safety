@@ -1,0 +1,41 @@
+2025-07-14 12:07:09,029 [INFO] Generating synthetic dataset
+2025-07-14 12:07:38,483 [INFO] Generating synthetic dataset
+2025-07-14 12:20:40,563 [INFO] Generating synthetic dataset
+2025-07-14 12:28:12,597 [INFO] Generating synthetic dataset
+2025-07-14 12:28:47,207 [INFO] Generating synthetic dataset
+2025-07-14 15:52:01,551 [INFO] Generating synthetic dataset
+2025-07-14 15:52:31,389 [INFO] Generating synthetic dataset
+2025-07-14 16:09:41,740 [INFO] Generating synthetic dataset
+2025-07-14 16:10:42,026 [INFO] Generating synthetic dataset
+2025-07-14 16:16:26,245 [INFO] Generating synthetic dataset
+2025-07-14 16:16:58,697 [INFO] Generating synthetic dataset
+2025-07-15 11:16:20,256 [INFO] Generating synthetic dataset
+2025-07-15 11:17:08,233 [INFO] Generating synthetic dataset
+2025-07-15 11:22:14,738 [INFO] Generating synthetic dataset
+2025-07-15 11:23:23,782 [INFO] Generating synthetic dataset
+2025-07-15 15:54:23,991 [INFO] Generating synthetic dataset
+2025-07-15 15:59:12,764 [INFO] Generating synthetic dataset
+2025-07-15 17:24:46,661 [ERROR] Task exception was never retrieved
+future: <Task finished name='Task-235' coro=<WebSocketProtocol13.write_message.<locals>.wrapper() done, defined at /Users/gourav/CascadeProjects/navmesh_ml2d/.venv/lib/python3.9/site-packages/tornado/websocket.py:1111> exception=WebSocketClosedError()>
+Traceback (most recent call last):
+  File "/Users/gourav/CascadeProjects/navmesh_ml2d/.venv/lib/python3.9/site-packages/streamlit/web/bootstrap.py", line 348, in run
+    if asyncio.get_running_loop().is_running():
+RuntimeError: no running event loop
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/gourav/CascadeProjects/navmesh_ml2d/.venv/lib/python3.9/site-packages/tornado/websocket.py", line 1113, in wrapper
+    await fut
+tornado.iostream.StreamClosedError: Stream is closed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/gourav/CascadeProjects/navmesh_ml2d/.venv/lib/python3.9/site-packages/tornado/websocket.py", line 1115, in wrapper
+    raise WebSocketClosedError()
+tornado.websocket.WebSocketClosedError
+2025-07-15 23:48:05,930 [INFO] Generating synthetic dataset
+2025-08-22 16:59:33,490 [INFO] Generating synthetic dataset
+2025-09-02 14:19:23,351 [WARNING] From C:\Users\User\AppData\Local\Programs\Python\Python310\lib\site-packages\keras\src\backend\common\global_state.py:82: The name tf.reset_default_graph is deprecated. Please use tf.compat.v1.reset_default_graph instead.
+

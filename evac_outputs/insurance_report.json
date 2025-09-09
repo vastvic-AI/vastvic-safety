@@ -1,0 +1,93 @@
+{
+  "total_agents": 80,
+  "evacuation_time": "1:40 (500 ticks)",
+  "avg_speed": 1.2,
+  "panic_level": 10,
+  "stampede_risk": 90.0,
+  "exit_usage": {
+    "(33, 99)": 22.86,
+    "(0, 50)": 20.0,
+    "(33, 0)": 31.43,
+    "(65, 50)": 25.71
+  },
+  "per_exit_times": {
+    "(65, 50)": {
+      "count": 9,
+      "mean_s": 55.31111111111112,
+      "p50_s": 38.2,
+      "p90_s": 96.0,
+      "max_s": 98.4
+    },
+    "(33, 99)": {
+      "count": 8,
+      "mean_s": 54.25000000000001,
+      "p50_s": 63.60000000000001,
+      "p90_s": 81.34,
+      "max_s": 85.4
+    },
+    "(0, 50)": {
+      "count": 7,
+      "mean_s": 5.542857142857144,
+      "p50_s": 5.6000000000000005,
+      "p90_s": 7.680000000000001,
+      "max_s": 7.800000000000001
+    },
+    "(33, 0)": {
+      "count": 11,
+      "mean_s": 4.70909090909091,
+      "p50_s": 4.0,
+      "p90_s": 7.800000000000001,
+      "max_s": 8.6
+    }
+  },
+  "group_stats": {
+    "0": {
+      "count": 27,
+      "evac_mean_s": 19.272727272727273,
+      "evac_median_s": 7.800000000000001,
+      "congestion_mean": 273.4074074074074,
+      "exit_usage": {
+        "(65, 50)": 27.27,
+        "(33, 0)": 45.45,
+        "(33, 99)": 18.18,
+        "(0, 50)": 9.09
+      }
+    },
+    "1": {
+      "count": 27,
+      "evac_mean_s": 48.720000000000006,
+      "evac_median_s": 50.300000000000004,
+      "congestion_mean": 339.55555555555554,
+      "exit_usage": {
+        "(65, 50)": 40.0,
+        "(33, 99)": 40.0,
+        "(0, 50)": 10.0,
+        "(33, 0)": 10.0
+      }
+    },
+    "2": {
+      "count": 26,
+      "evac_mean_s": 23.08571428571429,
+      "evac_median_s": 5.5,
+      "congestion_mean": 241.76923076923077,
+      "exit_usage": {
+        "(33, 99)": 14.29,
+        "(0, 50)": 35.71,
+        "(65, 50)": 14.29,
+        "(33, 0)": 35.71
+      }
+    }
+  },
+  "risk_score": 61,
+  "evacuation_time_cat": "Low",
+  "stampede_risk_cat": "High",
+  "exit_congestion_cat": "High",
+  "agent_behavior": "Mixed",
+  "recommendations": "Improve exit signage or increase exit width to reduce queueing. | Conduct regular evacuation drills to reduce panic and crowd pressure. | Ensure clear aisles and remove obstacles from primary egress routes.",
+  "safety_checklist": {
+    "total_evac_under_5min": true,
+    "per_exit_p90_under_120s": true,
+    "stampede_risk_under_20pct": false,
+    "overall_pass": false
+  }
+}
