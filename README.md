@@ -10,14 +10,12 @@ Evacuation simulation and pathfinding app built with Streamlit. This README expl
 
 Windows (PowerShell):
 ```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
+python -m venv venv .\venv\Scripts\Activate.ps1
 ```
 
 Windows (Command Prompt):
 ```bat
-python -m venv venv
-venv\Scripts\activate.bat
+python -m venv venv venv\Scripts\activate.bat
 ```
 
 macOS/Linux:
@@ -30,6 +28,10 @@ source venv/bin/activate
 Install both requirement files in a single command (run from the repo root):
 ```bash
 pip install -r pathfinder-main/requirements.txt -r pathfinder-main/evacuation_simulation/requirements.txt
+```
+If install fails for numpy, run
+```bash
+pip install numpy
 ```
 
 ## 4. Run the app
