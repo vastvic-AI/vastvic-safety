@@ -390,8 +390,10 @@ def compute_path_cost(cost_map: np.ndarray, start: Cell, path: List[Cell]) -> fl
         prev = nxt
     return total
 
-def spawn_agents(free_cells: List[Cell], exits: List[Cell], N: int, seed: int = 42) -> List[Cell]:
-    rng = np.random.default_rng(seed)
+def spawn_agents(free_cells: List[Cell], exits: List[Cell], N: int, seed: Optional[int] = None) -> List[Cell]:
+    """Spawn N agents on free cells not on exits.
+    If seed is None, use entropy-based RNG to ensure per-run variability."""
+    rng = np.random.default_rng() if seed is None else np.random.default_rng(seed)
     candidates = [cell for cell in free_cells if cell not in exits]
     if len(candidates) == 0:
         return []
@@ -782,6 +784,20 @@ def step_simulation(state: Dict, panic: float = 0.1) -> None:
     grid = state["grid"]
     H, W = grid.shape
 
+    # Lazy init adaptive maps and RNG in session state
+    if "_rng" not in state:
+        state["_rng"] = random.Random(time.time())
+    if "adapt_map" not in state:
+        state["adapt_map"] = np.zeros_like(state["cost_map"], dtype=float)
+    if "_last_pos" not in state:
+        state["_last_pos"] = {i: None for i, _ in enumerate(agents)}
+    if "_motion_mode" not in state:
+        state["_motion_mode"] = {i: None for i, _ in enumerate(agents)}
+    if "_visited" not in state:
+        state["_visited"] = {i: set() for i, _ in enumerate(agents)}
+    # Small decay to gradually forget old congestion
+    state["adapt_map"] *= 0.985
+
     # Mark density/visits
     for a in agents:
         if not a.exited:
@@ -795,7 +811,7 @@ def step_simulation(state: Dict, panic: float = 0.1) -> None:
     # Proposals with one-agent-per-cell rule (except exits which allow queued intake)
     proposals: Dict[int, Cell] = {}
     target_counts: Dict[Cell, int] = {}
-    rng = random.Random(1234 + t)
+    rng = state["_rng"]
     for i, a in enumerate(agents):
         if a.exited:
             continue
@@ -807,29 +823,42 @@ def step_simulation(state: Dict, panic: float = 0.1) -> None:
         # Reached exit already handled in post-move via capacity
         H, W = grid.shape
         next_pos = a.pos
-        # Panic hesitation: tiny stochastic dithering
+        # Panic hesitation: tiny stochastic dithering (disabled if exit is in clear LOS nearby)
         if random.random() < (panic * getattr(a, "panic_mult", 1.0)) * 0.1:
-            # Noise bounded by not increasing octile distance to nearest exit
-            r, c = a.pos
-            SQRT2 = math.sqrt(2.0)
-            def h_oct(p, q):
-                dx = abs(p[0] - q[0]); dy = abs(p[1] - q[1])
-                return (dx + dy) + (SQRT2 - 2.0) * min(dx, dy)
+            # If any exit is visible with LOS and within a reasonable heuristic distance, skip dithering
+            los_near = False
             if exits:
-                cur_d = min(h_oct(a.pos, ex) for ex in exits)
-            else:
-                cur_d = 0.0
-            candidates = [(r, c), (r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
-            best = a.pos
-            best_d = cur_d
-            random.shuffle(candidates)
-            for rr, cc in candidates:
-                if 0 <= rr < H and 0 <= cc < W and np.isfinite(state["cost_map"][rr, cc]):
-                    d = min(h_oct((rr, cc), ex) for ex in exits) if exits else 0.0
-                    if d <= best_d + 1e-6:
-                        best = (rr, cc)
-                        best_d = d
-            next_pos = best
+                SQRT2 = math.sqrt(2.0)
+                def h_oct(p, q):
+                    dx = abs(p[0] - q[0]); dy = abs(p[1] - q[1])
+                    return (dx + dy) + (SQRT2 - 2.0) * min(dx, dy)
+                los_grid_chk = np.where(np.isfinite(state["cost_map"]), 0, 1)
+                for ex in exits:
+                    if _los_clear(los_grid_chk, a.pos, ex) and h_oct(a.pos, ex) <= 25.0:
+                        los_near = True
+                        break
+            if not los_near:
+                # Noise bounded by not increasing octile distance to nearest exit
+                r, c = a.pos
+                SQRT2 = math.sqrt(2.0)
+                def h_oct(p, q):
+                    dx = abs(p[0] - q[0]); dy = abs(p[1] - q[1])
+                    return (dx + dy) + (SQRT2 - 2.0) * min(dx, dy)
+                if exits:
+                    cur_d = min(h_oct(a.pos, ex) for ex in exits)
+                else:
+                    cur_d = 0.0
+                candidates = [(r, c), (r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
+                best = a.pos
+                best_d = cur_d
+                random.shuffle(candidates)
+                for rr, cc in candidates:
+                    if 0 <= rr < H and 0 <= cc < W and np.isfinite(state["cost_map"][rr, cc]):
+                        d = min(h_oct((rr, cc), ex) for ex in exits) if exits else 0.0
+                        if d <= best_d + 1e-6:
+                            best = (rr, cc)
+                            best_d = d
+                next_pos = best
         else:
             # Goal-driven movement with optional local avoidance
             r, c = a.pos
@@ -842,6 +871,62 @@ def step_simulation(state: Dict, panic: float = 0.1) -> None:
                     dx = abs(p[0] - q[0]); dy = abs(p[1] - q[1])
                     return (dx + dy) + (SQRT2 - 2.0) * min(dx, dy)
                 goal_cell = min(exits, key=lambda ex: h_oct(a.pos, ex)) if exits else a.pos
+
+            # Exit awareness: if we have a clear line-of-sight to any exit nearby, bias strongly toward it
+            los_grid = np.where(np.isfinite(state["cost_map"]), 0, 1)
+            los_target = None
+            if exits:
+                # Prefer closest exit by octile heuristic that has LOS and is reasonably near
+                SQRT2 = math.sqrt(2.0)
+                def h_oct(p, q):
+                    dx = abs(p[0] - q[0]); dy = abs(p[1] - q[1])
+                    return (dx + dy) + (SQRT2 - 2.0) * min(dx, dy)
+                sorted_exits = sorted(exits, key=lambda ex: h_oct(a.pos, ex))
+                for ex in sorted_exits[:3]:
+                    if _los_clear(los_grid, a.pos, ex) and h_oct(a.pos, ex) <= 25.0:
+                        los_target = ex
+                        break
+            if los_target is not None:
+                goal_cell = los_target
+                state["_motion_mode"][i] = 'straight'
+                mode = 'straight'
+
+            # Motion mode selection to introduce natural variability
+            if state["_motion_mode"].get(i) is None or rng.random() < 0.1:
+                state["_motion_mode"][i] = _choose_motion_mode(grid, a.pos)
+            mode = state["_motion_mode"].get(i, "straight")
+
+            # Bias the goal slightly based on mode (spiral/curvy/zigzag/left/right)
+            gr, gc = goal_cell
+            mr, mc = a.pos
+            dr, dc = gr - mr, gc - mc
+            mag = max(1.0, math.hypot(dr, dc))
+            ndir = (dr / mag, dc / mag)
+            # Per-mode lateral offsets
+            lat = (-ndir[1], ndir[0])
+            fwd = ndir
+            bias_scale = 1.0
+            if mode == 'curvy':
+                gr += int(round(0.5 * lat[0])); gc += int(round(0.5 * lat[1]))
+                bias_scale = 0.9
+            elif mode == 'zigzag':
+                sign = 1 if (t // 3) % 2 == 0 else -1
+                gr += int(round(sign * lat[0])); gc += int(round(sign * lat[1]))
+                bias_scale = 0.85
+            elif mode == 'spiral':
+                # small forward + lateral drift
+                gr += int(round(0.5 * fwd[0] + 0.5 * lat[0])); gc += int(round(0.5 * fwd[1] + 0.5 * lat[1]))
+                bias_scale = 0.8
+            elif mode == 'left':
+                gr += int(round(lat[0])); gc += int(round(lat[1]))
+                bias_scale = 0.95
+            elif mode == 'right':
+                gr -= int(round(lat[0])); gc -= int(round(lat[1]))
+                bias_scale = 0.95
+            # Keep biased goal within bounds and walkable if possible
+            br = int(np.clip(gr, 0, H - 1)); bc = int(np.clip(gc, 0, W - 1))
+            if 0 <= br < H and 0 <= bc < W and np.isfinite(state["cost_map"][br, bc]):
+                goal_cell = (br, bc)
 
             if state.get("enable_local_avoidance", True):
                 # Build allowed 8-neighborhood moves (including staying)
@@ -875,18 +960,94 @@ def step_simulation(state: Dict, panic: float = 0.1) -> None:
                     if abs(pr - r) <= 2 and abs(pc - c) <= 2:
                         neighbor_agents.append((float(pr), float(pc)))
 
+                # Effective cost map mixes base cost, learned avoidance, and live density
+                # Learned avoidance encourages detours from historically congested/conflicted areas
+                visits = state.get("visits")
+                t_eff = max(1, t)
+                density_term = (visits / float(t_eff)) if visits is not None else 0.0
+                effective_cost = state["cost_map"] + 0.75 * state["adapt_map"] + 0.5 * density_term
+
+                # Discourage backtracking explicitly by inflating cost of the previous cell
+                last_p = state["_last_pos"].get(i)
+                if last_p is not None:
+                    lr, lc = last_p
+                    if 0 <= lr < H and 0 <= lc < W:
+                        effective_cost[lr, lc] = effective_cost[lr, lc] + 2.0
+
+                # Strongly discourage revisiting any previously visited cells by this agent
+                visited = state["_visited"].get(i)
+                if visited:
+                    for vr, vc in list(visited):
+                        if 0 <= vr < H and 0 <= vc < W and np.isfinite(effective_cost[vr, vc]):
+                            effective_cost[vr, vc] = effective_cost[vr, vc] + 1.0
+
+                # Weight goals/repulsions based on motion mode and panic
+                panic_mult = getattr(a, "panic_mult", 1.0)
+                w_goal = 1.0 * bias_scale
+                w_agents = 0.8 * (1.0 + 0.3 * (panic * panic_mult))
+                w_walls = 0.6
+
                 ranked = rank_moves(grid=np.where(np.isfinite(state["cost_map"]), 0, 1),
-                                     cost_map=state["cost_map"],
+                                     cost_map=effective_cost,
                                      pos=a.pos,
                                      goal=(float(goal_cell[0]), float(goal_cell[1])),
                                      allowed=allowed,
                                      neighbor_agents=neighbor_agents,
                                      wall_repulsion_radius=2,
                                      agent_repulsion_radius=2.0,
-                                     w_goal=1.0,
-                                     w_agents=0.8,
-                                     w_walls=0.6)
-                next_pos = ranked[0][1] if ranked else a.pos
+                                     w_goal=w_goal,
+                                     w_agents=w_agents,
+                                     w_walls=w_walls)
+
+                # If LOS to exit, force greedy step that most reduces octile distance.
+                # Otherwise, avoid backtracking/visited if possible, else soft selection for variability
+                if ranked:
+                    if los_target is not None:
+                        # Greedy: choose move that strictly reduces octile distance to the LOS exit
+                        SQRT2 = math.sqrt(2.0)
+                        def h_oct2(p, q):
+                            dx = abs(p[0] - q[0]); dy = abs(p[1] - q[1])
+                            return (dx + dy) + (SQRT2 - 2.0) * min(dx, dy)
+                        cur_h = h_oct2(a.pos, los_target)
+                        best_mv = a.pos
+                        best_h = cur_h
+                        for _, mv in ranked[:5]:
+                            nh = h_oct2(mv, los_target)
+                            if nh < best_h - 1e-6:
+                                best_h = nh
+                                best_mv = mv
+                        next_pos = best_mv
+                    else:
+                        # Prefer candidates that are not last_pos and not in visited if they don't worsen heuristic
+                        last_p = state["_last_pos"].get(i)
+                        visited = state["_visited"].get(i, set())
+                        # Heuristic toward current goal
+                        SQRT2 = math.sqrt(2.0)
+                        def h_goal(p):
+                            dx = abs(p[0] - goal_cell[0]); dy = abs(p[1] - goal_cell[1])
+                            return (dx + dy) + (SQRT2 - 2.0) * min(dx, dy)
+                        cur_h = h_goal(a.pos)
+                        candidates = [mv for _, mv in ranked[:5]]
+                        # Filter out exact backtrack if alternatives exist
+                        alt = [mv for mv in candidates if mv != last_p and h_goal(mv) <= cur_h + 1e-6]
+                        if alt:
+                            candidates = alt
+                        # Prefer unvisited
+                        alt2 = [mv for mv in candidates if mv not in visited]
+                        if alt2:
+                            candidates = alt2
+                        # If multiple, sample softly among top 3 of the filtered
+                        sub_ranked = [item for item in ranked if item[1] in candidates]
+                        top_k = sub_ranked[:min(3, len(sub_ranked))] if sub_ranked else ranked[:min(3, len(ranked))]
+                        temp = max(0.15, 0.5 * (2.0 - w_goal))
+                        scores = np.array([s for s, _ in top_k], dtype=float)
+                        scores = scores - scores.max()
+                        probs = np.exp(scores / temp)
+                        probs = probs / (probs.sum() + 1e-9)
+                        choice = rng.choices(range(len(top_k)), weights=probs.tolist(), k=1)[0]
+                        next_pos = top_k[choice][1]
+                else:
+                    next_pos = a.pos
             else:
                 # Strict path following with 8-dir corner-cut prevention
                 next_pos = a.pos
@@ -985,6 +1146,10 @@ def step_simulation(state: Dict, panic: float = 0.1) -> None:
                 a.congestion += 1
                 if random.random() < 0.1:
                     a.congestion += 1
+                # Learn: increase avoidance at congested spot
+                pr, pc = a.pos
+                if 0 <= pr < H and 0 <= pc < W:
+                    state["adapt_map"][pr, pc] += 0.5
             continue
         if len(idxs) == 1:
             # Single agent can move
@@ -1013,6 +1178,10 @@ def step_simulation(state: Dict, panic: float = 0.1) -> None:
                     # Losers wait in place
                     new_positions.add(a.pos)
                     a.congestion += 1
+                    # Learn from losing a conflict
+                    pr, pc = a.pos
+                    if 0 <= pr < H and 0 <= pc < W:
+                        state["adapt_map"][pr, pc] += 0.3
 
     
 
@@ -1030,6 +1199,13 @@ def step_simulation(state: Dict, panic: float = 0.1) -> None:
             state.setdefault("exit_counts_by_type", {})
             state["exit_counts_by_type"].setdefault(atype, {})
             state["exit_counts_by_type"][atype][ex] = state["exit_counts_by_type"][atype].get(ex, 0) + 1
+
+    # Update last positions for backtrack discouragement
+    for i, a in enumerate(agents):
+        if not a.exited:
+            state["_last_pos"][i] = a.pos
+            # Remember visited to reduce backtracking
+            state["_visited"].setdefault(i, set()).add(a.pos)
 
     # (Removed) Stuck detection, periodic replanning, and Dijkstra fallback per user request
 
@@ -1869,6 +2045,76 @@ with right:
         free = int(np.sum(grid == 0))
         hz = int(np.sum(hazards == 1))
         st.caption(f"Grid stats — walls: {walls}, free: {free}, hazards: {hz}, exits: {len(exits_list)}")
+
+# Optional A* debug diagnostics
+st.markdown("---")
+with st.expander("A* Pathfinding Debug", expanded=False):
+    debug_on = st.checkbox("Enable A* debug (recompute ideal paths for sample agents)", value=False)
+    sample_n = int(st.number_input("Sample agents", min_value=1, max_value=200, value=10, step=1)) if debug_on else 0
+    if debug_on:
+        agents = st.session_state.get("agents", [])
+        exits = st.session_state.get("exits", [])
+        cost_map = st.session_state.get("cost_map")
+        if not agents or not exits or cost_map is None:
+            st.info("A* debug requires agents, exits, and a cost map.")
+        else:
+            # Recompute best A* path per agent across exits
+            rows = []
+            for idx, a in enumerate(agents[:sample_n]):
+                start = a.pos
+                best_p = []
+                best_c = float('inf')
+                best_ex = None
+                for ex in exits:
+                    p = astar_cached(cost_map, start, ex, cache=None)
+                    if p:
+                        c = compute_path_cost(cost_map, start, p)
+                        if c < best_c:
+                            best_c = c; best_p = p; best_ex = ex
+                rows.append({
+                    "agent_index": idx,
+                    "start": str(start),
+                    "nearest_exit": str(best_ex) if best_ex is not None else None,
+                    "path_len": len(best_p) if best_p else 0,
+                    "cost": float(best_c) if best_p else float('inf'),
+                    "reachable": bool(bool(best_p))
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            # Optionally show first debug path on the grid
+            if rows:
+                show_overlay = st.checkbox("Overlay first debug path on grid", value=False)
+                if show_overlay and rows[0]["reachable"]:
+                    # Render overlay path using current grid
+                    fig, ax = plt.subplots(figsize=(6, 6))
+                    base = np.zeros((grid.shape[0], grid.shape[1], 3), dtype=np.uint8)
+                    base[grid == 1] = [0, 0, 0]
+                    base[grid == 0] = [255, 255, 255]
+                    hz = st.session_state.get("hazards")
+                    if hz is not None:
+                        base[hz == 1] = [255, 200, 0]
+                    for (r, c) in exits:
+                        base[r, c] = [0, 200, 0]
+                    ax.imshow(base, origin='upper')
+                    # Recompute path for first agent and plot
+                    first = agents[0]
+                    # choose the same best exit as in table
+                    best_p = []
+                    best_c = float('inf')
+                    best_ex = None
+                    for ex in exits:
+                        p = astar_cached(cost_map, first.pos, ex, cache=None)
+                        if p:
+                            c = compute_path_cost(cost_map, first.pos, p)
+                            if c < best_c:
+                                best_c = c; best_p = p; best_ex = ex
+                    if best_p:
+                        arr = np.array([(first.pos[0], first.pos[1])] + best_p)
+                        ax.plot(arr[:,1], arr[:,0], 'b--', linewidth=2, label='A* path')
+                        ax.scatter([first.pos[1]],[first.pos[0]], c='blue', s=40, label='Start')
+                        ax.scatter([best_ex[1]],[best_ex[0]], c='green', s=40, label='Exit')
+                        ax.legend()
+                    ax.set_xticks([]); ax.set_yticks([])
+                    st.pyplot(fig)
 
 # Tabs for visuals
 st.markdown("---")
