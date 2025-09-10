@@ -27,7 +27,7 @@ source venv/bin/activate
 ## 2. Install dependencies
 Install both requirement files in a single command (run from the repo root):
 ```bash
-pip install -r pathfinder-main/requirements.txt -r pathfinder-main/evacuation_simulation/requirements.txt
+pip install -r safety-main/requirements.txt -r safety-main/evacuation_simulation/requirements.txt
 ```
 If install fails for numpy, run
 ```bash
